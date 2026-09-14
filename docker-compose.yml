@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  # 1. PostgreSQL Ma'lumotlar Bazasi (Production uchun)
+  db:
+    image: postgres:16-alpine
+    container_name: magistratura_db
+    restart: always
+    environment:
+      POSTGRES_USER: magistr_user
+      POSTGRES_PASSWORD: magistr_secure_password_2026
+      POSTGRES_DB: magistratura_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - magistr_net
+
+  # 2. FastAPI Backend Xizmati
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: magistratura_backend
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://magistr_user:magistr_secure_password_2026@db:5432/magistratura_db
+      SECRET_KEY: magistratura_production_secret_key_uzbekistan_2026
+      UPLOAD_DIR: /app/storage/uploads
+      EVIDENCE_DIR: /app/storage/evidence
+      REPORT_DIR: /app/storage/reports
+    volumes:
+      - ./storage:/app/storage
+    depends_on:
+      - db
+    networks:
+      - magistr_net
+
+  # 3. Frontend Veb-Server (Nginx + React)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: magistratura_frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - magistr_net
+
+volumes:
+  pgdata:
+
+networks:
+  magistr_net:
+    driver: bridge

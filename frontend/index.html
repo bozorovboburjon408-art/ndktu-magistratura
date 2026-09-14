@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="uz">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/pwa-192x192.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1e3a8a" />
+    <meta name="description" content="Navoiy davlat konchilik va texnologiyalar universiteti magistratura talabalari semestrlik monitoringi va 100 ballik baholash platformasi" />
+    
+    <!-- Open Graph (Telegram, WhatsApp, ijtimoiy tarmoqlar uchun) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="NDKTU — Magistratura Monitoring va Baholash Platformasi" />
+    <meta property="og:description" content="Navoiy davlat konchilik va texnologiyalar universiteti magistrantlari faoliyatini intellektual baholash va monitoring qilish milliy tizimi" />
+    <meta property="og:image" content="/logo.png" />
+    
+    <title>NDKTU | Magistratura Monitoring va Baholash Platformasi</title>
+  </head>
+  <body class="bg-slate-50 text-slate-900 antialiased font-sans">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Service Worker (PWA) ro'yxatdan o'tkazish
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').then((reg) => {
+            console.log('NDKTU PWA Service Worker ro\'yxatdan o\'tdi:', reg.scope);
+          }).catch((err) => {
+            console.warn('NDKTU PWA Service Worker xatosi:', err);
+          });
+        });
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,363 @@
+import React, { useState, useEffect } from 'react';
+import { User, FinalMark } from '../types';
+import { UZ_LABELS } from '../locales/uz';
+import { LocalDatabase } from '../services/localDatabase';
+import { ExcelExportService } from '../services/excelExportService';
+import { PdfExportService } from '../services/pdfExportService';
+import { NotificationService } from '../services/notificationService';
+import { 
+  Award, AlertTriangle, CheckCircle2, Download, 
+  Send, Edit3, Shield, Users, ArrowRight 
+} from 'lucide-react';
+
+interface DepartmentHeadPanelProps {
+  user: User;
+}
+
+export const DepartmentHeadPanel: React.FC<DepartmentHeadPanelProps> = ({ user }) => {
+  const [cycleState, setCycleState] = useState<string>('SCORING');
+  const [showOverrideModal, setShowOverrideModal] = useState(false);
+  const [selectedStudentForOverride, setSelectedStudentForOverride] = useState<any>(null);
+  const [overrideScoreVal, setOverrideScoreVal] = useState<number>(25.0);
+  const [overrideJustification, setOverrideJustification] = useState<string>('');
+
+  const loadStudentsData = () => {
+    const rawUsers = LocalDatabase.getUsers().filter(u => u.role === 'talaba');
+    const marks = LocalDatabase.getFinalMarks();
+    return rawUsers.map(u => {
+      const mark = marks.find(m => m.student_id === u.id && m.is_active);
+      return {
+        id: u.id,
+        full_name: u.full_name,
+        hemis_id: u.hemis_id || '3842100451',
+        specialty: u.specialty || '70610101 - Kompyuter tizimlari',
+        course_year: u.course_year || 1,
+        total_score: mark?.total_score || 85.0,
+        grade_scale: mark?.grade_scale || 4,
+        grade_label: mark?.grade_label || 'Yaxshi',
+        divergence_flag: mark?.divergence_flag || false,
+        divergence_details: mark?.divergence_details || (mark?.divergence_flag ? "Baholovchilar o'rtasida 20 balldan ortiq og'ish aniqlandi." : null),
+        rank: mark?.rank_in_specialty || 1,
+        is_published: false
+      };
+    });
+  };
+
+  const [students, setStudents] = useState<any[]>(loadStudentsData);
+
+  useEffect(() => {
+    return LocalDatabase.subscribe(() => {
+      setStudents(loadStudentsData());
+    });
+  }, []);
+
+  const handleStateChange = (nextState: string) => {
+    setCycleState(nextState);
+    if (nextState === 'PUBLISHED') {
+      setStudents(prev => prev.map(s => ({ ...s, is_published: true })));
+      LocalDatabase.addAuditEntry(
+        'CYCLE_STATE_CHANGED',
+        'MONITORING_CYCLE',
+        '1',
+        "Kafedra mudiri monitoring baholarini rasman e'lon qildi (PUBLISHED). 72 soatlik apellatsiya oynasi ochildi.",
+        user.id
+      );
+      NotificationService.success(
+        "Monitoring baholari e'lon qilindi!",
+        "Barcha talabalarga 72 soatlik apellatsiya oynasi ochildi (VMQ 45^2)."
+      );
+    } else {
+      NotificationService.info(
+        "Tsikl holati yangilandi",
+        `Yangi holat: ${nextState}`
+      );
+    }
+  };
+
+  const handleApplyOverride = async () => {
+    if (!overrideJustification || overrideJustification.trim().length < 10) {
+      NotificationService.warning(
+        "Asos yetarli emas",
+        "Bahoni tahrirlash uchun kamida 10 ta belgidan iborat asosli izoh kiritish majburiy (FR-5.5)."
+      );
+      return;
+    }
+
+    const currentMark = LocalDatabase.getFinalMark(selectedStudentForOverride.id);
+    if (currentMark) {
+      currentMark.total_score = overrideScoreVal;
+      currentMark.divergence_flag = false;
+      currentMark.grade_scale = overrideScoreVal >= 86 ? 5 : overrideScoreVal >= 71 ? 4 : overrideScoreVal >= 60 ? 3 : 2;
+      currentMark.grade_label = overrideScoreVal >= 86 ? "A'lo" : overrideScoreVal >= 71 ? "Yaxshi" : overrideScoreVal >= 60 ? "Qoniqarli" : "Qoniqarsiz";
+      LocalDatabase.saveFinalMark(currentMark);
+    }
+
+    await LocalDatabase.addAuditEntry(
+      'SCORE_OVERRIDE',
+      'FINAL_MARK',
+      String(selectedStudentForOverride.id),
+      `Kafedra mudiri ${user.full_name} talaba ${selectedStudentForOverride.full_name} bahosini ${overrideScoreVal} ga o'zgartirdi (Override). Yozma asos: ${overrideJustification}`,
+      user.id
+    );
+
+    setShowOverrideModal(false);
+    setOverrideJustification('');
+    NotificationService.success(
+      "Baho muvaffaqiyatli tahrirlandi!",
+      `${selectedStudentForOverride.full_name}: ${overrideScoreVal} ball (Audit jurnaliga qayd etildi).`
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      
+      {/* Sarlavha va Tsikl Holati */}
+      <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <Award className="w-6 h-6 text-purple-700" />
+            <h2 className="text-lg font-bold text-slate-900">Magistratura Bo‘limi Boshlig‘i Paneli</h2>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            Mas’ul shaxs: <span className="font-semibold text-slate-800">{user.full_name}</span> | 2025-2026 o‘quv yili, 2-semestr
+          </p>
+        </div>
+
+        {/* Excel Eksport Tugmasi (VMQ 52) */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => ExcelExportService.exportCouncilReport()}
+            className="inline-flex items-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold px-4 py-2.5 rounded-lg shadow transition active:scale-95"
+          >
+            <Download className="w-4 h-4" />
+            <span>Ilmiy Kengash Hisoboti (.xlsx)</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Monitoring Tsikli Holat Mashinasi (State Machine Stepper) */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+        <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-4">
+          Monitoring Tsikli Bosqichlari (State Machine)
+        </h3>
+        
+        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2 text-center text-xs">
+          {[
+            { key: 'CYCLE_OPEN', name: '1. Tsikl Ochiq' },
+            { key: 'SUBMISSION_OPEN', name: '2. Qabul Ochiq' },
+            { key: 'SCREENED', name: '3. Tekshirildi' },
+            { key: 'SCORING', name: '4. Baholashda' },
+            { key: 'CONFIRMED', name: '5. Tasdiqlandi' },
+            { key: 'PUBLISHED', name: '6. E‘lon Qilindi' },
+            { key: 'CYCLE_CLOSED', name: '7. Arxivlandi' }
+          ].map((st, idx) => {
+            const isActive = cycleState === st.key;
+            return (
+              <button
+                key={st.key}
+                onClick={() => handleStateChange(st.key)}
+                className={`p-2.5 rounded-lg border font-semibold transition ${
+                  isActive
+                    ? 'bg-purple-900 text-white border-purple-900 shadow'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                {st.name}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Og'ishlar (Divergence > 20) Ogohlantirish Paneli */}
+      {students.some(s => s.divergence_flag) && (
+        <div className="bg-rose-50 border border-rose-300 rounded-xl p-5 shadow-sm">
+          <div className="flex items-start justify-between">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-6 h-6 text-rose-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-sm font-bold text-rose-900">
+                  FR-5.3: Baholovchilar O‘rtasida 20 Balldan Ortiq Og‘ish (Divergence) Qayd Etildi!
+                </h4>
+                <p className="text-xs text-rose-800 mt-1">
+                  Nizom talabiga muvofiq, bunday holatda baho avtomatik e’lon qilinmaydi. Bo‘lim boshlig‘i asosli yozma izoh bilan bahoni tahrirlashi (override) yoki kafedra muhokamasiga qo‘yishi shart.
+                </p>
+                
+                {/* Og'ish bo'lgan talabalar */}
+                <div className="mt-3 space-y-2">
+                  {students.filter(s => s.divergence_flag).map(divStudent => (
+                    <div key={divStudent.id} className="bg-white rounded-lg p-3 border border-rose-200 flex items-center justify-between text-xs">
+                      <div>
+                        <span className="font-bold text-slate-900">{divStudent.full_name}</span> ({divStudent.specialty})
+                        <p className="text-rose-700 font-medium text-[11px] mt-0.5">{divStudent.divergence_details}</p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setSelectedStudentForOverride(divStudent);
+                          setShowOverrideModal(true);
+                        }}
+                        className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-3 py-1.5 rounded-lg shadow"
+                      >
+                        Bahoni tahrirlash (Override)
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Magistrantlar Monitoring Ro'yxati */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Users className="w-5 h-5 text-slate-700" />
+            <h3 className="text-sm font-bold text-slate-900">Talabalar Natijalari va Reytingi</h3>
+          </div>
+          
+          {cycleState !== 'PUBLISHED' && (
+            <button
+              onClick={() => handleStateChange('PUBLISHED')}
+              className="bg-blue-800 hover:bg-blue-900 text-white text-xs font-bold px-4 py-2 rounded-lg shadow flex items-center gap-1.5"
+            >
+              <Send className="w-3.5 h-3.5" />
+              <span>Baholarni Tasdiqlash va E'lon Qilish (72h)</span>
+            </button>
+          )}
+        </div>
+
+        <table className="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+              <th className="p-3">O‘rni</th>
+              <th className="p-3">Magistrant F.I.O.</th>
+              <th className="p-3">HEMIS ID</th>
+              <th className="p-3">Mutaxassislik</th>
+              <th className="p-3">Bosqich</th>
+              <th className="p-3">Umumiy Ball (100)</th>
+              <th className="p-3">Baho</th>
+              <th className="p-3">Og‘ish Holati</th>
+              <th className="p-3 text-right">Amallar</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 text-slate-800">
+            {students.map((st) => (
+              <tr key={st.id} className="hover:bg-slate-50">
+                <td className="p-3 font-bold text-blue-900">#{st.rank}</td>
+                <td className="p-3 font-semibold">{st.full_name}</td>
+                <td className="p-3 font-mono text-slate-500">{st.hemis_id}</td>
+                <td className="p-3 text-slate-600">{st.specialty}</td>
+                <td className="p-3">{st.course_year}-kurs</td>
+                <td className="p-3 font-black text-sm text-slate-900">{st.total_score} b</td>
+                <td className="p-3">
+                  <span className={`px-2 py-0.5 rounded font-bold text-[11px] ${
+                    st.grade_scale === 5 ? 'bg-emerald-100 text-emerald-800' :
+                    st.grade_scale === 4 ? 'bg-blue-100 text-blue-800' :
+                    'bg-amber-100 text-amber-800'
+                  }`}>
+                    {st.grade_scale} — {st.grade_label}
+                  </span>
+                </td>
+                <td className="p-3">
+                  {st.divergence_flag ? (
+                    <span className="text-rose-600 font-bold flex items-center gap-1">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      Og‘ish bor (&gt; 20)
+                    </span>
+                  ) : (
+                    <span className="text-emerald-600 font-semibold flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Kelishilgan
+                    </span>
+                  )}
+                </td>
+                <td className="p-3 text-right space-x-2">
+                  <button
+                    onClick={() => {
+                      setSelectedStudentForOverride(st);
+                      setShowOverrideModal(true);
+                    }}
+                    className="text-xs text-blue-700 hover:text-blue-900 font-bold"
+                  >
+                    Tahrirlash
+                  </button>
+                  <button
+                    onClick={() => PdfExportService.exportEvidencePack(st.id)}
+                    className="text-xs text-slate-600 hover:text-slate-900 font-semibold"
+                  >
+                    Dalillar (PDF)
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Bahoni Tahrirlash (Override) Modali */}
+      {showOverrideModal && selectedStudentForOverride && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-purple-700" />
+                <span>Bahoni Tahrirlash (FR-5.5 & A9)</span>
+              </h3>
+              <button onClick={() => setShowOverrideModal(false)} className="text-slate-400 hover:text-slate-600 font-bold">✕</button>
+            </div>
+
+            <p className="text-xs text-slate-600">
+              Talaba: <span className="font-bold text-slate-900">{selectedStudentForOverride.full_name}</span>
+            </p>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Yangi yakuniy umumiy ball (100 ballik shkalada):
+              </label>
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                max="100"
+                value={overrideScoreVal}
+                onChange={(e) => setOverrideScoreVal(parseFloat(e.target.value))}
+                className="w-full text-xs border border-slate-300 rounded-lg p-2.5 font-bold text-slate-900 focus:ring-2 focus:ring-purple-500 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Majburiy Yozma Asos (FR-5.5 talabi — Dalillar to‘plami va Auditga yoziladi):
+              </label>
+              <textarea
+                value={overrideJustification}
+                onChange={(e) => setOverrideJustification(e.target.value)}
+                rows={4}
+                placeholder="Baholovchilar o'rtasida 40 ballik tafovut bo'lganligi sababli, hisobot kafedrada qayta tahlil qilindi va talabaning dissertatsiya mustaqilligi inobatga olindi..."
+                className="w-full text-xs border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-purple-500 focus:outline-none"
+              />
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => setShowOverrideModal(false)}
+                className="px-4 py-2 border border-slate-300 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Bekor qilish
+              </button>
+              <button
+                onClick={handleApplyOverride}
+                className="px-4 py-2 bg-purple-700 hover:bg-purple-800 text-white rounded-lg text-xs font-bold shadow"
+              >
+                Asos bilan tasdiqlash
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+};
