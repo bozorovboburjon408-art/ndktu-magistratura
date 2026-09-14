@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User, FinalMark } from '../types';
 import { UZ_LABELS } from '../locales/uz';
 import { LocalDatabase } from '../services/localDatabase';
 import { ExcelExportService } from '../services/excelExportService';
+import { ExcelImportService, ParsedStudentRow } from '../services/excelImportService';
 import { PdfExportService } from '../services/pdfExportService';
 import { NotificationService } from '../services/notificationService';
 import { 
   Award, AlertTriangle, CheckCircle2, Download, 
-  Send, Edit3, Shield, Users, ArrowRight 
+  Send, Edit3, Shield, Users, ArrowRight, Upload,
+  Database, FileSpreadsheet, Check, X, RefreshCw
 } from 'lucide-react';
 
 interface DepartmentHeadPanelProps {
@@ -20,6 +22,14 @@ export const DepartmentHeadPanel: React.FC<DepartmentHeadPanelProps> = ({ user }
   const [selectedStudentForOverride, setSelectedStudentForOverride] = useState<any>(null);
   const [overrideScoreVal, setOverrideScoreVal] = useState<number>(25.0);
   const [overrideJustification, setOverrideJustification] = useState<string>('');
+
+  // Ommaviy import (Excel) va Zaxira holati
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [parsedImportRows, setParsedImportRows] = useState<ParsedStudentRow[]>([]);
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [isProcessingFile, setIsProcessingFile] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const backupInputRef = useRef<HTMLInputElement>(null);
 
   const loadStudentsData = () => {
     const rawUsers = LocalDatabase.getUsers().filter(u => u.role === 'talaba');
@@ -108,6 +118,72 @@ export const DepartmentHeadPanel: React.FC<DepartmentHeadPanelProps> = ({ user }
     );
   };
 
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsProcessingFile(true);
+    setImportErrors([]);
+    try {
+      const res = await ExcelImportService.parseStudentExcel(file);
+      setParsedImportRows(res.students);
+      setImportErrors(res.errors);
+      if (res.students.length > 0) {
+        NotificationService.info(
+          "Fayl tahlil qilindi",
+          `${res.students.length} nafar magistrant ma'lumoti aniqlandi.`
+        );
+      }
+    } catch (err: any) {
+      NotificationService.error("Excel xatoligi", err.message);
+    } finally {
+      setIsProcessingFile(false);
+    }
+  };
+
+  const handleCommitBulkImport = async () => {
+    if (parsedImportRows.length === 0) return;
+    try {
+      const res = await LocalDatabase.bulkImportStudents(parsedImportRows, user.id);
+      NotificationService.success(
+        "Import muvaffaqiyatli yakunlandi!",
+        `${res.addedCount} nafar yangi magistrant bazaga kiritildi. (O'tkazib yuborilgan dublikatlar: ${res.skippedDuplicates})`
+      );
+      setShowImportModal(false);
+      setParsedImportRows([]);
+      setImportErrors([]);
+    } catch (err: any) {
+      NotificationService.error("Bazaga kiritishda xatolik", err.message);
+    }
+  };
+
+  const handleExportBackup = () => {
+    try {
+      const json = LocalDatabase.exportFullBackup();
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `NDKTU_Magistratura_DB_Zaxirasi_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      NotificationService.success("Zaxira nusxa saqlandi", "Baza JSON fayli kompyuteringizga yuklandi.");
+    } catch (err: any) {
+      NotificationService.error("Zaxiralash xatosi", err.message);
+    }
+  };
+
+  const handleRestoreBackupFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      await LocalDatabase.importFullBackup(text, user.id);
+      NotificationService.success("Baza tiklandi", "Zaxira nusxadagi barcha ma'lumotlar qayta yuklandi.");
+    } catch (err: any) {
+      NotificationService.error("Tiklashda xatolik", err.message);
+    }
+  };
+
   return (
     <div className="space-y-6">
       
@@ -123,14 +199,60 @@ export const DepartmentHeadPanel: React.FC<DepartmentHeadPanelProps> = ({ user }
           </p>
         </div>
 
-        {/* Excel Eksport Tugmasi (VMQ 52) */}
-        <div className="flex items-center gap-3">
+        {/* Boshqaruv Tugmalari */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Yashirin fayl tanlagichlar */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            accept=".xlsx,.xls,.csv"
+            className="hidden"
+          />
+          <input
+            type="file"
+            ref={backupInputRef}
+            onChange={handleRestoreBackupFile}
+            accept=".json"
+            className="hidden"
+          />
+
+          {/* Ommaviy Import Tugmasi */}
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="inline-flex items-center gap-1.5 bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold px-3.5 py-2.5 rounded-lg shadow transition active:scale-95"
+          >
+            <Upload className="w-4 h-4" />
+            <span>Magistrantlarni Kiritish (Excel)</span>
+          </button>
+
+          {/* Excel Eksport Tugmasi (VMQ 52) */}
           <button
             onClick={() => ExcelExportService.exportCouncilReport()}
-            className="inline-flex items-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold px-4 py-2.5 rounded-lg shadow transition active:scale-95"
+            className="inline-flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold px-3.5 py-2.5 rounded-lg shadow transition active:scale-95"
           >
             <Download className="w-4 h-4" />
             <span>Ilmiy Kengash Hisoboti (.xlsx)</span>
+          </button>
+
+          {/* Baza Zaxira Nusxasi (JSON Backup) */}
+          <button
+            onClick={handleExportBackup}
+            className="inline-flex items-center gap-1.5 bg-slate-700 hover:bg-slate-800 text-white text-xs font-bold px-3 py-2.5 rounded-lg shadow transition active:scale-95"
+            title="Butun ma'lumotlar bazasini JSON formatida zaxiralash"
+          >
+            <Database className="w-4 h-4" />
+            <span>Zaxiralash (JSON)</span>
+          </button>
+
+          {/* Zaxiradan tiklash */}
+          <button
+            onClick={() => backupInputRef.current?.click()}
+            className="inline-flex items-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold px-2.5 py-2.5 rounded-lg border border-slate-300 transition active:scale-95"
+            title="JSON zaxira faylidan bazani qayta tiklash"
+          >
+            <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
+            <span>Tiklash</span>
           </button>
         </div>
       </div>
@@ -354,6 +476,158 @@ export const DepartmentHeadPanel: React.FC<DepartmentHeadPanelProps> = ({ user }
                 Asos bilan tasdiqlash
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Ommaviy Magistrantlar Kiritish Modali (Excel) */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-5 max-h-[90vh] flex flex-col">
+            
+            {/* Modal Sarlavhasi */}
+            <div className="flex items-center justify-between border-b pb-3 flex-shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-blue-50 text-blue-700">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Magistrantlarni Ommaviy Kiritish (Excel/CSV)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Kafedra bo'yicha yangi magistrantlar ro'yxatini bazaga tezkor yuklash
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  setShowImportModal(false);
+                  setParsedImportRows([]);
+                  setImportErrors([]);
+                }} 
+                className="text-slate-400 hover:text-slate-600 font-bold p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Tanasi */}
+            <div className="space-y-4 overflow-y-auto flex-1 pr-1">
+              
+              {/* 1-qadam: Shablonni olish */}
+              <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-4 flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-blue-900">1-qadam: Rasmiy Excel Shablonini Yuklab Olish</h4>
+                  <p className="text-[11px] text-blue-700 mt-0.5">
+                    Ustunlar: F.I.SH, HEMIS ID, Mutaxassislik, Kurs, Email, Dissertatsiya mavzusi, Ilmiy rahbar.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => ExcelImportService.downloadStudentTemplate()}
+                  className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-2 rounded-lg shadow-sm transition"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Shablon (.xlsx)</span>
+                </button>
+              </div>
+
+              {/* 2-qadam: Faylni tanlash */}
+              <div>
+                <h4 className="text-xs font-bold text-slate-800 mb-2">2-qadam: To'ldirilgan Excel faylini yuklang</h4>
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50/20 rounded-xl p-6 text-center cursor-pointer transition"
+                >
+                  <Upload className="w-8 h-8 text-blue-600 mx-auto mb-2" />
+                  <p className="text-xs font-bold text-slate-800">
+                    Faylni tanlash uchun bu yerga bosing
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Qo'llab-quvvatlanadi: .xlsx, .xls, .csv
+                  </p>
+                </div>
+              </div>
+
+              {/* Xatoliklar ro'yxati (agar bo'lsa) */}
+              {importErrors.length > 0 && (
+                <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-xs text-rose-800 space-y-1">
+                  <div className="font-bold flex items-center gap-1.5 text-rose-900">
+                    <AlertTriangle className="w-4 h-4 text-rose-600" />
+                    <span>Faylda quyidagi ogohlantirishlar aniqlandi:</span>
+                  </div>
+                  <ul className="list-disc pl-5 space-y-0.5 text-[11px]">
+                    {importErrors.map((err, idx) => (
+                      <li key={idx}>{err}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* 3-qadam: O'qilgan magistrantlar ko'rigi (Preview) */}
+              {parsedImportRows.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-xs font-bold text-emerald-800 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      <span>Aniqlangan magistrantlar ({parsedImportRows.length} nafar):</span>
+                    </h4>
+                  </div>
+
+                  <div className="border border-slate-200 rounded-lg overflow-hidden max-h-48 overflow-y-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-100 text-slate-600 font-bold sticky top-0">
+                        <tr>
+                          <th className="p-2">№</th>
+                          <th className="p-2">F.I.SH.</th>
+                          <th className="p-2">HEMIS ID</th>
+                          <th className="p-2">Kurs</th>
+                          <th className="p-2">Mutaxassislik</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {parsedImportRows.map((r, i) => (
+                          <tr key={i} className="hover:bg-slate-50">
+                            <td className="p-2 text-slate-500">{i + 1}</td>
+                            <td className="p-2 font-semibold text-slate-800">{r.full_name}</td>
+                            <td className="p-2 text-blue-700 font-mono text-[11px]">{r.hemis_id}</td>
+                            <td className="p-2">{r.course_year}-kurs</td>
+                            <td className="p-2 text-slate-600 text-[11px] truncate max-w-[180px]">{r.specialty}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+            {/* Modal Tugmalari */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowImportModal(false);
+                  setParsedImportRows([]);
+                  setImportErrors([]);
+                }}
+                className="px-4 py-2 border border-slate-300 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Bekor qilish
+              </button>
+              <button
+                type="button"
+                onClick={handleCommitBulkImport}
+                disabled={parsedImportRows.length === 0}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-700 hover:bg-blue-800 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-lg text-xs font-bold shadow transition"
+              >
+                <Check className="w-4 h-4" />
+                <span>Baza (DB) ga saqlash ({parsedImportRows.length})</span>
+              </button>
+            </div>
+
           </div>
         </div>
       )}

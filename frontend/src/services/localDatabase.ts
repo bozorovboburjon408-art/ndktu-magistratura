@@ -729,4 +729,137 @@ export class LocalDatabase {
     }
     return { isValid: true };
   }
+
+  /**
+   * Excel orqali ommaviy yangi magistrantlarni bazaga kiritish
+   */
+  static async bulkImportStudents(
+    studentsToImport: Array<{
+      full_name: string;
+      hemis_id: string;
+      specialty: string;
+      course_year: number;
+      email?: string;
+      dissertation_topic?: string;
+      supervisor_name?: string;
+    }>,
+    operatorUserId?: number
+  ): Promise<{ addedCount: number; skippedDuplicates: number }> {
+    const db = this.getDB();
+    const existingHemisIds = new Set(db.users.map(u => u.hemis_id).filter(Boolean));
+    
+    let addedCount = 0;
+    let skippedDuplicates = 0;
+    let nextUserId = Math.max(...db.users.map(u => u.id), 0) + 1;
+    let nextMarkId = Math.max(...db.finalMarks.map(m => m.id), 0) + 1;
+
+    for (const item of studentsToImport) {
+      if (existingHemisIds.has(item.hemis_id)) {
+        skippedDuplicates++;
+        continue;
+      }
+
+      const newUser: User = {
+        id: nextUserId++,
+        username: `magistr_${item.hemis_id}`,
+        full_name: item.full_name,
+        role: 'talaba',
+        specialty: item.specialty,
+        course_year: item.course_year || 1,
+        hemis_id: item.hemis_id,
+        email: item.email || `magistr_${item.hemis_id}@edu.uz`
+      };
+
+      db.users.push(newUser);
+      existingHemisIds.add(item.hemis_id);
+
+      // Boshlang'ich monitoring reyting ko'rsatkichi yaratish
+      const newMark: FinalMark = {
+        id: nextMarkId++,
+        student_id: newUser.id,
+        cycle_id: 1,
+        research_report_score: 24.0,
+        live_presentation_score: 16.0,
+        pedagogical_report_score: 12.0,
+        slides_score: 8.0,
+        publications_score: 10.0,
+        calendar_plan_score: 9.0,
+        academic_performance_score: 4.1,
+        total_score: 83.1,
+        grade_scale: 4,
+        grade_label: "Yaxshi",
+        divergence_flag: false,
+        version_number: 1,
+        is_active: true,
+        rank_in_specialty: db.users.filter(u => u.role === 'talaba').length,
+        total_in_specialty: db.users.filter(u => u.role === 'talaba').length,
+        published_at: new Date().toISOString()
+      };
+
+      db.finalMarks.push(newMark);
+      addedCount++;
+    }
+
+    if (addedCount > 0) {
+      // Reytinglarni qayta hisoblash
+      const activeMarks = db.finalMarks.filter(m => m.is_active);
+      activeMarks.sort((a, b) => b.total_score - a.total_score);
+      activeMarks.forEach((m, idx) => {
+        m.rank_in_specialty = idx + 1;
+        m.total_in_specialty = activeMarks.length;
+      });
+
+      this.saveDB(db);
+      await this.addAuditEntry(
+        'BULK_STUDENT_IMPORT',
+        'USERS_DATABASE',
+        `${addedCount}`,
+        `Kafedra tomonidan Excel orqali ${addedCount} nafar magistrant ma'lumotlar bazasiga ommaviy kiritildi. Dublikatlar: ${skippedDuplicates}`,
+        operatorUserId
+      );
+      this.notify();
+    }
+
+    return { addedCount, skippedDuplicates };
+  }
+
+  /**
+   * Butun ma'lumotlar bazasini JSON zaxira nusxa shaklida eksport qilish
+   */
+  static exportFullBackup(): string {
+    const db = this.getDB();
+    const payload = {
+      version: '2.0.0',
+      exported_at: new Date().toISOString(),
+      institution: 'NDKTU',
+      data: db
+    };
+    return JSON.stringify(payload, null, 2);
+  }
+
+  /**
+   * Zaxira nusxa (JSON) dan bazani qayta tiklash
+   */
+  static async importFullBackup(jsonString: string, operatorUserId?: number): Promise<boolean> {
+    try {
+      const parsed = JSON.parse(jsonString);
+      const dataToRestore: DatabaseSchema = parsed.data || parsed;
+      if (!Array.isArray(dataToRestore.users) || !Array.isArray(dataToRestore.finalMarks)) {
+        throw new Error("Noto'g'ri zaxira fayl strukturasi");
+      }
+      this.saveDB(dataToRestore);
+      await this.addAuditEntry(
+        'DATABASE_RESTORED',
+        'FULL_BACKUP',
+        '0',
+        "Ma'lumotlar bazasi JSON zaxira nusxasidan to'liq tiklandi",
+        operatorUserId
+      );
+      this.notify();
+      return true;
+    } catch (e: any) {
+      console.error("Backup restore error:", e);
+      throw e;
+    }
+  }
 }
