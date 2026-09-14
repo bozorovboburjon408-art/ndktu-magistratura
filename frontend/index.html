@@ -18,14 +18,25 @@
     <title>NDKTU | Magistratura Monitoring va Baholash Platformasi</title>
   </head>
   <body class="bg-slate-50 text-slate-900 antialiased font-sans">
-    <div id="root"></div>
+    <div id="root">
+      <!-- Dastlabki yuklanish yoki keshni tiklash ko'rinishi -->
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: system-ui, -apple-system, sans-serif; text-align: center; padding: 24px; background: #f8fafc;">
+        <img src="/logo.png" alt="NDKTU" style="width: 80px; height: 80px; margin-bottom: 16px; object-fit: contain;" />
+        <h2 style="margin: 0 0 8px; color: #1e3a8a; font-size: 20px; font-weight: 800;">NDKTU Magistratura Platformasi</h2>
+        <p style="color: #64748b; font-size: 13px; margin: 0 0 20px;">Tizim yangilanmoqda, iltimos kuting...</p>
+        <button onclick="if('caches' in window){caches.keys().then(k=>Promise.all(k.map(i=>caches.delete(i)))).then(()=>{location.reload(true)})}else{location.reload(true)}" style="background: #1e3a8a; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-size: 13px; cursor: pointer; font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+          Sahifani Yangilash (Keshni tozalash)
+        </button>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
-      // Service Worker (PWA) ro'yxatdan o'tkazish
+      // Service Worker (PWA) ro'yxatdan o'tkazish va yangilanishlarni qabul qilish
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js').then((reg) => {
-            console.log('NDKTU PWA Service Worker ro\'yxatdan o\'tdi:', reg.scope);
+            reg.update();
+            console.log('NDKTU PWA Service Worker yangilandi:', reg.scope);
           }).catch((err) => {
             console.warn('NDKTU PWA Service Worker xatosi:', err);
           });

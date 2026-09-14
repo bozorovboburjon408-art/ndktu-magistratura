@@ -389,16 +389,26 @@ export class LocalDatabase {
   }
 
   static getDB(): DatabaseSchema {
+    const initial = this.getInitialData();
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      const initial = this.getInitialData();
       localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
       return initial;
     }
     try {
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') throw new Error();
+      return {
+        users: Array.isArray(parsed.users) && parsed.users.length > 0 ? parsed.users : initial.users,
+        submissions: Array.isArray(parsed.submissions) ? parsed.submissions : initial.submissions,
+        screeningResults: parsed.screeningResults && typeof parsed.screeningResults === 'object' ? parsed.screeningResults : initial.screeningResults,
+        finalMarks: Array.isArray(parsed.finalMarks) && parsed.finalMarks.length > 0 ? parsed.finalMarks : initial.finalMarks,
+        assessorScores: Array.isArray(parsed.assessorScores) ? parsed.assessorScores : initial.assessorScores,
+        appeals: Array.isArray(parsed.appeals) ? parsed.appeals : initial.appeals,
+        auditLogs: Array.isArray(parsed.auditLogs) ? parsed.auditLogs : initial.auditLogs,
+        calendarPlans: Array.isArray(parsed.calendarPlans) ? parsed.calendarPlans : initial.calendarPlans,
+      };
     } catch {
-      const initial = this.getInitialData();
       localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
       return initial;
     }
